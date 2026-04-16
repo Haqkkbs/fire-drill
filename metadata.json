@@ -1,5 +1,5 @@
 {
-  "name": "Fire Drill Assembly Tracker",
+  "name": "Fire Drill Check-In",
   "description": "A real-time geofenced assembly point tracker for fire drills, ensuring student safety with live admin monitoring.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": []
