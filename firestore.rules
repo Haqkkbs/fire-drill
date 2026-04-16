@@ -80,5 +80,13 @@ service cloud.firestore {
       
       allow delete: if isSuperAdmin();
     }
+
+    match /settings/{settingId} {
+      // Anyone can read settings (to see if alarm is active)
+      allow read: if true;
+      
+      // Only admins can update global settings
+      allow write: if isAdmin();
+    }
   }
 }

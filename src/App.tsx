@@ -55,7 +55,10 @@ import {
   Briefcase,
   UserPlus,
   Trash2,
-  RefreshCcw
+  RefreshCcw,
+  Bell,
+  BellOff,
+  Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
@@ -73,6 +76,7 @@ export default function App() {
   const [role, setRole] = useState<'Student' | 'Staff' | 'Visitor'>('Student');
   const [checkingIn, setCheckingIn] = useState(false);
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+  const [alarmActive, setAlarmActive] = useState(false);
 
   // Auth Listener
   useEffect(() => {
@@ -145,6 +149,44 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  // Settings Listener (Alarm)
+  useEffect(() => {
+    console.log("Setting up alarm listener...");
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        console.log("Alarm status received:", data.alarmActive);
+        setAlarmActive(data.alarmActive || false);
+        
+        // Play siren sound if alarm is active
+        if (data.alarmActive) {
+          const audio = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c35078173b.mp3'); // Emergency siren
+          audio.loop = true;
+          audio.play().catch(e => console.log("Audio play blocked by browser:", e));
+          
+          // Store audio in a ref to stop it later
+          (window as any)._fireSiren = audio;
+        } else {
+          if ((window as any)._fireSiren) {
+            (window as any)._fireSiren.pause();
+            (window as any)._fireSiren = null;
+          }
+        }
+      } else {
+        console.log("Settings document does not exist");
+      }
+    }, (error) => {
+      console.error("Alarm listener error:", error);
+    });
+
+    return () => {
+      unsubscribe();
+      if ((window as any)._fireSiren) {
+        (window as any)._fireSiren.pause();
+      }
+    };
+  }, []);
+
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -196,6 +238,25 @@ export default function App() {
       setMessage({ text: "All check-in data has been cleared.", type: 'success' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'checkins/all');
+    }
+  };
+
+  const toggleFireAlarm = async () => {
+    const newState = !alarmActive;
+    console.log("Toggling alarm to:", newState);
+    if (newState && !window.confirm("TRIGGER FIRE ALARM? This will alert ALL users!")) return;
+    
+    try {
+      console.log("Writing to Firestore settings/global...");
+      await setDoc(doc(db, 'settings', 'global'), {
+        alarmActive: newState,
+        triggeredBy: user?.uid || 'anonymous',
+        triggeredAt: serverTimestamp()
+      }, { merge: true });
+      console.log("Firestore write successful");
+    } catch (error) {
+      console.error("Firestore write failed:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
   };
 
@@ -313,6 +374,48 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+        <AnimatePresence>
+          {alarmActive && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-red-600 overflow-hidden"
+            >
+              <motion.div
+                animate={{ 
+                  backgroundColor: ['#dc2626', '#991b1b', '#dc2626'],
+                  scale: [1, 1.05, 1]
+                }}
+                transition={{ repeat: Infinity, duration: 0.5 }}
+                className="absolute inset-0"
+              />
+              <div className="relative z-10 text-center p-6 text-white space-y-8">
+                <motion.div
+                  animate={{ rotate: [0, -10, 10, -10, 10, 0] }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                >
+                  <AlertTriangle className="w-32 h-32 mx-auto" />
+                </motion.div>
+                <div className="space-y-4">
+                  <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase italic">
+                    FIRE EMERGENCY
+                  </h1>
+                  <p className="text-2xl md:text-3xl font-bold uppercase tracking-widest opacity-90">
+                    Evacuate to Assembly Point Immediately!
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex items-center gap-2 bg-white/20 backdrop-blur-md px-6 py-3 rounded-full border border-white/30">
+                    <Volume2 className="w-6 h-6 animate-pulse" />
+                    <span className="font-bold uppercase tracking-widest text-sm">Siren Active</span>
+                  </div>
+                  <p className="text-sm opacity-70 italic">Please follow the emergency floor plan</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -498,6 +601,18 @@ export default function App() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
+                    <Button 
+                      variant={alarmActive ? "outline" : "destructive"}
+                      size="sm" 
+                      onClick={toggleFireAlarm}
+                      className={alarmActive ? "bg-white text-red-600 border-red-200" : "bg-red-600 text-white hover:bg-red-700"}
+                    >
+                      {alarmActive ? (
+                        <><BellOff className="w-4 h-4 mr-2" /> Stop Alarm</>
+                      ) : (
+                        <><Bell className="w-4 h-4 mr-2" /> Trigger Alarm</>
+                      )}
+                    </Button>
                     <Button 
                       variant="destructive" 
                       size="sm" 

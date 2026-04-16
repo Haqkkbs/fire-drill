@@ -61,6 +61,23 @@
         }
       },
       "required": ["email", "role", "displayName"]
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "alarmActive": {
+          "type": "boolean"
+        },
+        "triggeredBy": {
+          "type": "string"
+        },
+        "triggeredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
     }
   },
   "firestore": {
@@ -71,6 +88,10 @@
     "/users/{userId}": {
       "schema": "users",
       "description": "Collection of user profiles"
+    },
+    "/settings/global": {
+      "schema": "settings",
+      "description": "Global application settings"
     }
   }
 }
