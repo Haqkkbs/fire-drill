@@ -61,11 +61,11 @@ service cloud.firestore {
       // Students can check in (create) without authentication as requested.
       allow create: if isValidCheckin(request.resource.data);
       
-      // Only admins can see the list of check-ins
-      allow read: if isAdmin();
+      // Only admins can see the list of check-ins and delete them
+      allow read, delete: if isAdmin();
       
-      // No one can update or delete check-ins
-      allow update, delete: if false;
+      // No one can update check-ins
+      allow update: if false;
     }
     
     match /users/{userId} {

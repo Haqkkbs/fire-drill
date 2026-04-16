@@ -17,7 +17,8 @@ import {
   doc,
   getDoc,
   setDoc,
-  updateDoc
+  updateDoc,
+  deleteDoc
 } from '@/src/lib/firebase';
 import { calculateDistance, TARGET_COORDS, ALLOWED_RADIUS } from '@/src/lib/haversine';
 import { StudentCheckin, UserProfile } from '@/src/types';
@@ -31,6 +32,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { 
@@ -45,7 +53,9 @@ import {
   Navigation,
   UserCircle,
   Briefcase,
-  UserPlus
+  UserPlus,
+  Trash2,
+  RefreshCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
@@ -59,6 +69,7 @@ export default function App() {
   const [checkins, setCheckins] = useState<StudentCheckin[]>([]);
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState('');
+  const [staffId, setStaffId] = useState('');
   const [role, setRole] = useState<'Student' | 'Staff' | 'Visitor'>('Student');
   const [checkingIn, setCheckingIn] = useState(false);
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
@@ -164,9 +175,35 @@ export default function App() {
     }
   };
 
+  const handleDeleteCheckin = async (id: string) => {
+    if (!window.confirm("Are you sure you want to remove this check-in?")) return;
+    
+    try {
+      await deleteDoc(doc(db, 'checkins', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `checkins/${id}`);
+    }
+  };
+
+  const handleClearAllCheckins = async () => {
+    if (!window.confirm("WARNING: This will delete ALL check-in data. Are you absolutely sure?")) return;
+    
+    try {
+      // In a real production app with thousands of records, we'd use a cloud function or batch.
+      // For this scale, we can delete them individually or in a small loop.
+      const deletePromises = checkins.map(c => deleteDoc(doc(db, 'checkins', c.id!)));
+      await Promise.all(deletePromises);
+      setMessage({ text: "All check-in data has been cleared.", type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'checkins/all');
+    }
+  };
+
   const handleCheckIn = async () => {
-    if (!studentName || !studentId) {
-      setMessage({ text: "Please enter both Name and Student ID.", type: 'error' });
+    const finalId = role === 'Staff' ? staffId : studentId;
+    
+    if (!studentName || !finalId) {
+      setMessage({ text: `Please enter both Name and ${role === 'Visitor' ? 'IC/Passport' : 'ID'}.`, type: 'error' });
       return;
     }
 
@@ -181,7 +218,7 @@ export default function App() {
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const { latitude, longitude } = position.coords;
+        const { latitude, longitude, accuracy } = position.coords;
         const distance = calculateDistance(
           latitude,
           longitude,
@@ -189,11 +226,23 @@ export default function App() {
           TARGET_COORDS.lng
         );
 
+        console.log(`Location detected: Lat ${latitude}, Lng ${longitude}, Accuracy: ${accuracy}m, Distance: ${distance}m`);
+
+        // If accuracy is very poor (e.g. > 100m), warn the user
+        if (accuracy > 100) {
+          setMessage({ 
+            text: `GPS signal is too weak (accuracy: ${Math.round(accuracy)}m). Please move to an open area and try again.`, 
+            type: 'error' 
+          });
+          setCheckingIn(false);
+          return;
+        }
+
         if (distance <= ALLOWED_RADIUS) {
           try {
             await addDoc(collection(db, 'checkins'), {
               name: studentName,
-              studentId: studentId,
+              studentId: finalId,
               role: role,
               status: 'SAFE',
               timestamp: serverTimestamp(),
@@ -204,6 +253,7 @@ export default function App() {
             setMessage({ text: "Check-in successful! You are marked as SAFE.", type: 'success' });
             setStudentName('');
             setStudentId('');
+            setStaffId('');
           } catch (error) {
             handleFirestoreError(error, OperationType.CREATE, 'checkins');
           }
@@ -229,8 +279,8 @@ export default function App() {
       },
       { 
         enableHighAccuracy: true, 
-        timeout: 10000, // 10 seconds timeout
-        maximumAge: 30000 // Accept a cached position up to 30 seconds old
+        timeout: 15000, // Increased to 15 seconds for better accuracy acquisition
+        maximumAge: 0 // Force fresh location, do not use cache
       }
     );
   };
@@ -353,14 +403,30 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">
-                      {role === 'Student' ? 'Student ID' : role === 'Staff' ? 'Staff ID' : 'IC / Passport No'}
+                      {role === 'Student' ? 'Student ID' : role === 'Staff' ? 'Staff Department' : 'IC / Passport No'}
                     </label>
-                    <Input 
-                      placeholder={`Enter your ${role === 'Visitor' ? 'IC or Passport number' : role.toLowerCase() + ' ID'}`} 
-                      value={studentId}
-                      onChange={(e) => setStudentId(e.target.value)}
-                      className="h-11"
-                    />
+                    
+                    {role === 'Staff' ? (
+                      <Select value={staffId} onValueChange={setStaffId}>
+                        <SelectTrigger className="h-11">
+                          <SelectValue placeholder="Select Department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SKE">SKE</SelectItem>
+                          <SelectItem value="SKU">SKU</SelectItem>
+                          <SelectItem value="SOP">SOP</SelectItem>
+                          <SelectItem value="UPA">UPA</SelectItem>
+                          <SelectItem value="ADMIN">ADMIN</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input 
+                        placeholder={`Enter your ${role === 'Visitor' ? 'IC or Passport number' : 'student ID'}`} 
+                        value={studentId}
+                        onChange={(e) => setStudentId(e.target.value)}
+                        className="h-11"
+                      />
+                    )}
                   </div>
 
                   {message && (
@@ -405,7 +471,7 @@ export default function App() {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">Target Zone</p>
-                  <p className="text-sm text-blue-900 font-medium">Assembly Point A (50m Radius)</p>
+                  <p className="text-sm text-blue-900 font-medium">Assembly Point A (5m Radius)</p>
                 </div>
               </div>
             </motion.div>
@@ -431,7 +497,18 @@ export default function App() {
                       Live Monitoring: {format(new Date(), 'eeee, d MMMM yyyy')}
                     </p>
                   </div>
-                  <Badge className="bg-red-100 text-red-700 border-none self-start md:self-center">Live Monitoring</Badge>
+                  <div className="flex items-center gap-3">
+                    <Button 
+                      variant="destructive" 
+                      size="sm" 
+                      onClick={handleClearAllCheckins}
+                      className="bg-red-50 text-red-600 hover:bg-red-100 border-red-200"
+                    >
+                      <RefreshCcw className="w-4 h-4 mr-2" />
+                      Clear All Data
+                    </Button>
+                    <Badge className="bg-red-100 text-red-700 border-none">Live Monitoring</Badge>
+                  </div>
                 </div>
 
                 {/* Super Admin User Management */}
@@ -535,13 +612,14 @@ export default function App() {
                               <TableHead>ID</TableHead>
                               <TableHead>Time</TableHead>
                               <TableHead>Distance</TableHead>
-                              <TableHead className="text-right">Status</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead className="text-right">Action</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {checkins.length === 0 ? (
                               <TableRow key="no-checkins">
-                                <TableCell colSpan={6} className="text-center py-10 text-slate-400 italic">
+                                <TableCell colSpan={7} className="text-center py-10 text-slate-400 italic">
                                   No check-ins recorded yet.
                                 </TableCell>
                               </TableRow>
@@ -567,10 +645,20 @@ export default function App() {
                                       {checkin.distance}m
                                     </Badge>
                                   </TableCell>
-                                  <TableCell className="text-right">
+                                  <TableCell>
                                     <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none">
                                       SAFE
                                     </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      className="text-slate-400 hover:text-red-600"
+                                      onClick={() => handleDeleteCheckin(checkin.id!)}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
                                   </TableCell>
                                 </TableRow>
                               ))
