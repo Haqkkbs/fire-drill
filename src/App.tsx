@@ -380,7 +380,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-red-600 overflow-hidden"
+              className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-red-600 overflow-hidden"
             >
               <motion.div
                 animate={{ 
@@ -390,6 +390,21 @@ export default function App() {
                 transition={{ repeat: Infinity, duration: 0.5 }}
                 className="absolute inset-0"
               />
+              
+              {/* Admin Bypass Button */}
+              {(userProfile?.role === 'admin' || user?.email === 'mhaq1980@gmail.com') && (
+                <div className="absolute top-6 right-6 z-20">
+                  <Button 
+                    variant="outline" 
+                    className="bg-white/10 hover:bg-white/20 border-white/30 text-white backdrop-blur-md"
+                    onClick={() => setAlarmActive(false)}
+                  >
+                    <LogOut className="w-4 h-4 mr-2 rotate-180" />
+                    Bypass to Dashboard
+                  </Button>
+                </div>
+              )}
+
               <div className="relative z-10 text-center p-6 text-white space-y-8">
                 <motion.div
                   animate={{ rotate: [0, -10, 10, -10, 10, 0] }}
@@ -398,10 +413,10 @@ export default function App() {
                   <AlertTriangle className="w-32 h-32 mx-auto" />
                 </motion.div>
                 <div className="space-y-4">
-                  <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase italic">
+                  <h1 className="text-5xl md:text-8xl font-black tracking-tighter uppercase italic">
                     FIRE EMERGENCY
                   </h1>
-                  <p className="text-2xl md:text-3xl font-bold uppercase tracking-widest opacity-90">
+                  <p className="text-xl md:text-3xl font-bold uppercase tracking-widest opacity-90">
                     Evacuate to Assembly Point Immediately!
                   </p>
                 </div>
@@ -410,6 +425,18 @@ export default function App() {
                     <Volume2 className="w-6 h-6 animate-pulse" />
                     <span className="font-bold uppercase tracking-widest text-sm">Siren Active</span>
                   </div>
+                  
+                  {/* User Check-in Shortcut */}
+                  <div className="mt-4">
+                    <Button 
+                      size="lg"
+                      className="bg-white text-red-600 hover:bg-slate-100 font-bold px-8 py-6 text-xl rounded-2xl shadow-2xl"
+                      onClick={() => setAlarmActive(false)}
+                    >
+                      I AM AT ASSEMBLY POINT
+                    </Button>
+                  </div>
+                  
                   <p className="text-sm opacity-70 italic">Please follow the emergency floor plan</p>
                 </div>
               </div>
