@@ -1,0 +1,84 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: checkins
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required) - Full name
+//   - studentId: string (required) - Student ID
+//   - status: string (required, enum: ['SAFE']) - Safety status
+//   - timestamp: timestamp (required) - Check-in time
+//   - latitude: number (optional) - Latitude
+//   - longitude: number (optional) - Longitude
+//   - distance: number (optional) - Distance from target
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "mhaq1980@gmail.com" || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.email == "mhaq1980@gmail.com";
+    }
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'displayName']) &&
+             data.email is string &&
+             data.role in ['admin', 'user'] &&
+             data.displayName is string;
+    }
+
+    function isValidCheckin(data) {
+      return data.keys().hasAll(['name', 'studentId', 'role', 'status', 'timestamp']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.studentId is string && data.studentId.size() > 0 && data.studentId.size() < 50 &&
+             data.role in ['Student', 'Staff', 'Visitor'] &&
+             data.status == 'SAFE' &&
+             data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /checkins/{checkinId} {
+      // Students can check in (create) without authentication as requested.
+      allow create: if isValidCheckin(request.resource.data);
+      
+      // Only admins can see the list of check-ins
+      allow read: if isAdmin();
+      
+      // No one can update or delete check-ins
+      allow update, delete: if false;
+    }
+    
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // Users can create their own profile as 'user' role
+      allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'user';
+      
+      // Only super admin can change roles
+      allow update: if isSuperAdmin() || (isAuthenticated() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "A student who has checked in at the assembly point.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the student"
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Unique student or staff identification number"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Student", "Staff", "Visitor"],
+          "description": "Role of the person checking in"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["SAFE"],
+          "description": "Safety status of the student"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Time when the student checked in"
+        },
+        "latitude": {
+          "type": "number",
+          "description": "Latitude at check-in"
+        },
+        "longitude": {
+          "type": "number",
+          "description": "Longitude at check-in"
+        },
+        "distance": {
+          "type": "number",
+          "description": "Distance from target in meters"
+        }
+      },
+      "required": ["name", "studentId", "status", "timestamp"]
+    },
+    "users": {
+      "title": "User Profile",
+      "description": "User profile with role management",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "user"]
+        }
+      },
+      "required": ["email", "role", "displayName"]
+    }
+  },
+  "firestore": {
+    "/checkins/{checkinId}": {
+      "schema": "Student",
+      "description": "Collection of student check-ins during the fire drill."
+    },
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "Collection of user profiles"
+    }
+  }
+}
