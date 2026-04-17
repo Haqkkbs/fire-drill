@@ -274,7 +274,7 @@ export default function App() {
       if (newState) {
         setLocalAlarmBypass(false);
         
-        // Telegram - non-blocking
+        // Telegram - non-blocking feedback
         fetch('/api/notify-telegram', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -282,12 +282,23 @@ export default function App() {
             alarmActive: true,
             appUrl: window.location.origin
           })
-        }).then(r => r.json())
-          .then(data => console.log("Telegram response:", data))
-          .catch(err => console.error("Telegram error:", err));
+        }).then(async r => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.message || 'Notification server error');
+          return data;
+        }).then(data => {
+          console.log("Telegram response:", data);
+          setMessage({ text: "Alarm triggered successfully! (Telegram Sent ✅)", type: 'success' });
+        }).catch(err => {
+          console.error("Telegram Notification Failed:", err);
+          setMessage({ 
+            text: `Alarm triggered BUT Telegram failed: ${err.message}. Ensure TELEGRAM_BOT_TOKEN and CHAT_ID are set in AI Studio Secrets!`, 
+            type: 'error' 
+          });
+        });
+      } else {
+        setMessage({ text: "Alarm stopped successfully.", type: 'success' });
       }
-      
-      setMessage({ text: newState ? "Alarm triggered successfully!" : "Alarm stopped successfully.", type: 'success' });
     } catch (error) {
       console.error("Fire alarm toggle failed:", error);
       setMessage({ text: "Failed to update alarm status. Check console for details.", type: 'error' });

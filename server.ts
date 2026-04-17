@@ -51,14 +51,22 @@ async function startServer() {
             parse_mode: "Markdown"
           })
         });
-        return response.json();
+        
+        const data = await response.json();
+        if (!data.ok) {
+          throw new Error(`Telegram Error (ID: ${chatId}): ${data.description || 'Unknown error'}`);
+        }
+        return data;
       }));
 
-      console.log("Telegram API results:", results);
+      console.log("Telegram API success:", results);
       res.json({ success: true, results });
     } catch (error) {
       console.error("Error sending Telegram notification:", error);
-      res.status(500).json({ success: false, error: String(error) });
+      res.status(500).json({ 
+        success: false, 
+        message: error instanceof Error ? error.message : "Failed to notify Telegram" 
+      });
     }
   });
 
