@@ -72,11 +72,13 @@ export default function App() {
   const [checkins, setCheckins] = useState<StudentCheckin[]>([]);
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState('');
+  const [studentClass, setStudentClass] = useState('');
   const [staffId, setStaffId] = useState('');
   const [role, setRole] = useState<'Student' | 'Staff' | 'Visitor'>('Student');
   const [checkingIn, setCheckingIn] = useState(false);
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [alarmActive, setAlarmActive] = useState(false);
+  const [localAlarmBypass, setLocalAlarmBypass] = useState(false);
 
   // Auth Listener
   useEffect(() => {
@@ -157,6 +159,11 @@ export default function App() {
         const data = snapshot.data();
         console.log("Alarm status received:", data.alarmActive);
         setAlarmActive(data.alarmActive || false);
+        
+        // Reset local bypass when alarm is turned off globally
+        if (!data.alarmActive) {
+          setLocalAlarmBypass(false);
+        }
         
         // Play siren sound if alarm is active
         if (data.alarmActive) {
@@ -243,20 +250,49 @@ export default function App() {
 
   const toggleFireAlarm = async () => {
     const newState = !alarmActive;
-    console.log("Toggling alarm to:", newState);
-    if (newState && !window.confirm("TRIGGER FIRE ALARM? This will alert ALL users!")) return;
+    console.log("Attempting to toggle alarm to:", newState);
+    
+    // Simple confirmation for triggering
+    if (newState && !window.confirm("CONFIRM: ACTIVATE FIRE DRILL ALARM?")) {
+      console.log("Toggle cancelled by user");
+      return;
+    }
     
     try {
-      console.log("Writing to Firestore settings/global...");
-      await setDoc(doc(db, 'settings', 'global'), {
+      setCheckingIn(true); // Using this as a temporary loading state
+      const settingsRef = doc(db, 'settings', 'global');
+      
+      console.log("Saving to Firestore...");
+      await setDoc(settingsRef, {
         alarmActive: newState,
         triggeredBy: user?.uid || 'anonymous',
-        triggeredAt: serverTimestamp()
+        updatedAt: serverTimestamp()
       }, { merge: true });
-      console.log("Firestore write successful");
+      
+      console.log("Firestore update success");
+
+      if (newState) {
+        setLocalAlarmBypass(false);
+        
+        // Telegram - non-blocking
+        fetch('/api/notify-telegram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            alarmActive: true,
+            appUrl: window.location.origin
+          })
+        }).then(r => r.json())
+          .then(data => console.log("Telegram response:", data))
+          .catch(err => console.error("Telegram error:", err));
+      }
+      
+      setMessage({ text: newState ? "Alarm triggered successfully!" : "Alarm stopped successfully.", type: 'success' });
     } catch (error) {
-      console.error("Firestore write failed:", error);
-      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+      console.error("Fire alarm toggle failed:", error);
+      setMessage({ text: "Failed to update alarm status. Check console for details.", type: 'error' });
+    } finally {
+      setCheckingIn(false);
     }
   };
 
@@ -301,7 +337,7 @@ export default function App() {
 
         if (distance <= ALLOWED_RADIUS) {
           try {
-            await addDoc(collection(db, 'checkins'), {
+            const checkinData: any = {
               name: studentName,
               studentId: finalId,
               role: role,
@@ -310,11 +346,18 @@ export default function App() {
               latitude,
               longitude,
               distance: Math.round(distance)
-            });
+            };
+
+            if (role === 'Student' && studentClass) {
+              checkinData.class = studentClass;
+            }
+
+            await addDoc(collection(db, 'checkins'), checkinData);
             setMessage({ text: "Check-in successful! You are marked as SAFE.", type: 'success' });
             setStudentName('');
             setStudentId('');
             setStaffId('');
+            setStudentClass('');
           } catch (error) {
             handleFirestoreError(error, OperationType.CREATE, 'checkins');
           }
@@ -346,17 +389,26 @@ export default function App() {
     );
   };
 
-  const studentCount = checkins.filter(c => c.role === 'Student').length;
-  const staffCount = checkins.filter(c => c.role === 'Staff').length;
-  const visitorCount = checkins.filter(c => c.role === 'Visitor').length;
+  const studentByClassCount: { [key: string]: number } = {};
+  checkins.forEach(c => {
+    if (c.role === 'Student' && (c as any).class) {
+      const cls = (c as any).class;
+      studentByClassCount[cls] = (studentByClassCount[cls] || 0) + 1;
+    }
+  });
 
-  const chartData = [
-    { name: 'Students', value: studentCount },
-    { name: 'Staff', value: staffCount },
-    { name: 'Visitors', value: visitorCount },
-  ];
+  const chartData = Object.keys(studentByClassCount).length > 0 
+    ? Object.keys(studentByClassCount).map(cls => ({
+        name: cls,
+        value: studentByClassCount[cls]
+      }))
+    : [
+        { name: 'Students', value: checkins.filter(c => c.role === 'Student').length },
+        { name: 'Staff', value: checkins.filter(c => c.role === 'Staff').length },
+        { name: 'Visitors', value: checkins.filter(c => c.role === 'Visitor').length },
+      ];
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b'];
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16'];
 
   if (loading) {
     return (
@@ -375,7 +427,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         <AnimatePresence>
-          {alarmActive && (
+          {(alarmActive && !localAlarmBypass) && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -397,7 +449,7 @@ export default function App() {
                   <Button 
                     variant="outline" 
                     className="bg-white/10 hover:bg-white/20 border-white/30 text-white backdrop-blur-md"
-                    onClick={() => setAlarmActive(false)}
+                    onClick={() => setLocalAlarmBypass(true)}
                   >
                     <LogOut className="w-4 h-4 mr-2 rotate-180" />
                     Bypass to Dashboard
@@ -431,7 +483,7 @@ export default function App() {
                     <Button 
                       size="lg"
                       className="bg-white text-red-600 hover:bg-slate-100 font-bold px-8 py-6 text-xl rounded-2xl shadow-2xl"
-                      onClick={() => setAlarmActive(false)}
+                      onClick={() => setLocalAlarmBypass(true)}
                     >
                       I AM AT ASSEMBLY POINT
                     </Button>
@@ -533,7 +585,7 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">
-                      {role === 'Student' ? 'Student ID' : role === 'Staff' ? 'Staff Department' : 'IC / Passport No'}
+                      {role === 'Student' ? 'Matrix Number' : role === 'Staff' ? 'Staff Department' : 'IC / Passport No'}
                     </label>
                     
                     {role === 'Staff' ? (
@@ -551,13 +603,38 @@ export default function App() {
                       </Select>
                     ) : (
                       <Input 
-                        placeholder={`Enter your ${role === 'Visitor' ? 'IC or Passport number' : 'student ID'}`} 
+                        placeholder={`Enter your ${role === 'Visitor' ? 'IC or Passport number' : 'Matrix Number'}`} 
                         value={studentId}
                         onChange={(e) => setStudentId(e.target.value)}
                         className="h-11"
                       />
                     )}
                   </div>
+
+                  {role === 'Student' && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Class</label>
+                      <Select value={studentClass} onValueChange={setStudentClass}>
+                        <SelectTrigger className="h-11">
+                          <SelectValue placeholder="Select Class" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SKU 1A">SKU 1A</SelectItem>
+                          <SelectItem value="SKU 1B">SKU 1B</SelectItem>
+                          <SelectItem value="SKU 2">SKU 2</SelectItem>
+                          <SelectItem value="SKU 3">SKU 3</SelectItem>
+                          <SelectItem value="SOP 1">SOP 1</SelectItem>
+                          <SelectItem value="SOP 2A">SOP 2A</SelectItem>
+                          <SelectItem value="SOP 2B">SOP 2B</SelectItem>
+                          <SelectItem value="SOP 3">SOP 3</SelectItem>
+                          <SelectItem value="SKE 1">SKE 1</SelectItem>
+                          <SelectItem value="SKE 2A">SKE 2A</SelectItem>
+                          <SelectItem value="SKE 2B">SKE 2B</SelectItem>
+                          <SelectItem value="SKE 3">SKE 3</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   {message && (
                     <motion.div 
@@ -632,12 +709,19 @@ export default function App() {
                       variant={alarmActive ? "outline" : "destructive"}
                       size="sm" 
                       onClick={toggleFireAlarm}
-                      className={alarmActive ? "bg-white text-red-600 border-red-200" : "bg-red-600 text-white hover:bg-red-700"}
+                      disabled={checkingIn}
+                      className={alarmActive ? "bg-white text-red-600 border-red-200 min-w-[140px]" : "bg-red-600 text-white hover:bg-red-700 min-w-[140px]"}
                     >
-                      {alarmActive ? (
-                        <><BellOff className="w-4 h-4 mr-2" /> Stop Alarm</>
+                      {checkingIn ? (
+                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}>
+                          <RefreshCcw className="w-4 h-4" />
+                        </motion.div>
                       ) : (
-                        <><Bell className="w-4 h-4 mr-2" /> Trigger Alarm</>
+                        alarmActive ? (
+                          <><BellOff className="w-4 h-4 mr-2" /> Stop Alarm</>
+                        ) : (
+                          <><Bell className="w-4 h-4 mr-2" /> Trigger Alarm</>
+                        )
                       )}
                     </Button>
                     <Button 
@@ -750,6 +834,7 @@ export default function App() {
                           <TableHeader className="sticky top-0 bg-white z-10">
                             <TableRow>
                               <TableHead>Name</TableHead>
+                              <TableHead>Class</TableHead>
                               <TableHead>Role</TableHead>
                               <TableHead>ID</TableHead>
                               <TableHead>Time</TableHead>
@@ -761,7 +846,7 @@ export default function App() {
                           <TableBody>
                             {checkins.length === 0 ? (
                               <TableRow key="no-checkins">
-                                <TableCell colSpan={7} className="text-center py-10 text-slate-400 italic">
+                                <TableCell colSpan={8} className="text-center py-10 text-slate-400 italic">
                                   No check-ins recorded yet.
                                 </TableCell>
                               </TableRow>
@@ -769,6 +854,7 @@ export default function App() {
                               checkins.map((checkin, index) => (
                                 <TableRow key={checkin.id || `checkin-${index}-${checkin.studentId}`} className="hover:bg-slate-50 transition-colors">
                                   <TableCell className="font-medium">{checkin.name}</TableCell>
+                                  <TableCell className="text-slate-600 text-xs font-bold">{(checkin as any).class || '-'}</TableCell>
                                   <TableCell>
                                     <Badge variant="outline" className={
                                       checkin.role === 'Staff' ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : 
@@ -814,7 +900,7 @@ export default function App() {
                   {/* Chart */}
                   <Card className="shadow-md">
                     <CardHeader>
-                      <CardTitle className="text-lg">Attendance Mix</CardTitle>
+                      <CardTitle className="text-lg">Attendance Details</CardTitle>
                     </CardHeader>
                     <CardContent className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
