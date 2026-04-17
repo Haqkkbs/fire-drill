@@ -25,16 +25,19 @@ async function startServer() {
 
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatIds = [
+      process.env.TELEGRAM_CHAT_ID,   // Generic version
       process.env.TELEGRAM_CHAT_ID_1,
       process.env.TELEGRAM_CHAT_ID_2
     ].filter(id => !!id);
 
-    if (!token || chatIds.length === 0) {
-      console.error("Telegram configuration missing. Check environment variables.");
-      return res.status(500).json({ 
-        success: false, 
-        message: "Telegram bot token or chat IDs missing in environment variables." 
-      });
+    if (!token) {
+      console.error("Telegram Token Missing");
+      return res.status(500).json({ success: false, message: "TELEGRAM_BOT_TOKEN is missing in Secrets." });
+    }
+
+    if (chatIds.length === 0) {
+      console.error("Telegram Chat ID Missing");
+      return res.status(500).json({ success: false, message: "TELEGRAM_CHAT_ID is missing in Secrets." });
     }
 
     const message = `🚨 *EMERGENCY: FIRE DRILL CHECK-IN* 🚨\n\nAttention ALL students and staff! A fire drill has been triggered.\n\nPlease evacuate immediately to the Assembly Point and mark yourself as SAFE here:\n\n🔗 ${appUrl}\n\nStay calm and follow instructions.`;
