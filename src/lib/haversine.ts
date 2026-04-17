@@ -26,4 +26,4 @@ export const TARGET_COORDS = {
   lng: 115.71537723641826,
 };
 
-export const ALLOWED_RADIUS = 10; // meters
+export const ALLOWED_RADIUS = 15; // meters

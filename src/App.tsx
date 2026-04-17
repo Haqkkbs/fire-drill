@@ -283,6 +283,11 @@ export default function App() {
             appUrl: window.location.origin
           })
         }).then(async r => {
+          const contentType = r.headers.get("content-type");
+          if (!contentType || !contentType.includes("application/json")) {
+            // This happens on static hosts like Netlify where API doesn't exist (returns HTML 404)
+            throw new Error('API server not found. Please use the AI Studio Build Preview/Share link for Telegram features.');
+          }
           const data = await r.json();
           if (!r.ok) throw new Error(data.message || 'Notification server error');
           return data;
@@ -689,7 +694,7 @@ export default function App() {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">Target Zone</p>
-                  <p className="text-sm text-blue-900 font-medium">Assembly Point A (5m Radius)</p>
+                  <p className="text-sm text-blue-900 font-medium">Assembly Point A ({ALLOWED_RADIUS}m Radius)</p>
                 </div>
               </div>
             </motion.div>
