@@ -3,11 +3,32 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import admin from "firebase-admin";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize Firebase Admin
+let fcmReady = false;
+try {
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
+    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) 
+    : null;
+    
+  if (serviceAccount) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    fcmReady = true;
+    console.log("Firebase Admin Initialized for FCM");
+  } else {
+    console.warn("FIREBASE_SERVICE_ACCOUNT not found. Push notifications will be disabled.");
+  }
+} catch (error) {
+  console.error("Failed to initialize Firebase Admin:", error);
+}
 
 async function startServer() {
   const app = express();
@@ -15,60 +36,54 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API Route: Send Telegram Notification
-  app.post("/api/notify-telegram", async (req, res) => {
-    const { alarmActive, appUrl } = req.body;
+  // API Route: Send Push Notification via FCM
+  app.post("/api/notify-push", async (req, res) => {
+    const { alarmActive, tokens } = req.body;
 
     if (!alarmActive) {
-      return res.json({ success: true, message: "Alarm disabled, no notification sent." });
+      return res.json({ success: true, message: "Alarm disabled." });
     }
 
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatIds = [
-      process.env.TELEGRAM_CHAT_ID,   // Generic version
-      process.env.TELEGRAM_CHAT_ID_1,
-      process.env.TELEGRAM_CHAT_ID_2
-    ].filter(id => !!id);
-
-    if (!token) {
-      console.error("Telegram Token Missing");
-      return res.status(500).json({ success: false, message: "TELEGRAM_BOT_TOKEN is missing in Secrets." });
+    if (!fcmReady) {
+      return res.status(503).json({ 
+        success: false, 
+        message: "Push Notification Server not configured. Please add FIREBASE_SERVICE_ACCOUNT to Secrets." 
+      });
     }
 
-    if (chatIds.length === 0) {
-      console.error("Telegram Chat ID Missing");
-      return res.status(500).json({ success: false, message: "TELEGRAM_CHAT_ID is missing in Secrets." });
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+      return res.status(400).json({ success: false, message: "No target device tokens provided." });
     }
 
-    const message = `🚨 *EMERGENCY: FIRE DRILL CHECK-IN* 🚨\n\nAttention ALL students and staff! A fire drill has been triggered.\n\nPlease evacuate immediately to the Assembly Point and mark yourself as SAFE here:\n\n🔗 ${appUrl}\n\nStay calm and follow instructions.`;
+    const message = {
+      notification: {
+        title: "🚨 FIRE DRILL ACTIVE",
+        body: "A fire drill has been triggered! Please evacuate to the Assembly Point immediately and mark yourself as SAFE."
+      },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "fire_drill_channel",
+          priority: "max",
+          clickAction: "FLUTTER_NOTIFICATION_CLICK"
+        }
+      },
+      tokens: tokens
+    };
 
     try {
-      const results = await Promise.all(chatIds.map(async (chatId) => {
-        const url = `https://api.telegram.org/bot${token}/sendMessage`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: message,
-            parse_mode: "Markdown"
-          })
-        });
-        
-        const data = await response.json();
-        if (!data.ok) {
-          throw new Error(`Telegram Error (ID: ${chatId}): ${data.description || 'Unknown error'}`);
-        }
-        return data;
-      }));
-
-      console.log("Telegram API success:", results);
-      res.json({ success: true, results });
+      const response = await admin.messaging().sendEachForMulticast(message as any);
+      console.log(`FCM Broadcast: ${response.successCount} successful, ${response.failureCount} failed.`);
+      res.json({ 
+        success: true, 
+        successCount: response.successCount, 
+        failureCount: response.failureCount 
+      });
     } catch (error) {
-      console.error("Error sending Telegram notification:", error);
+      console.error("Error sending FCM notification:", error);
       res.status(500).json({ 
         success: false, 
-        message: error instanceof Error ? error.message : "Failed to notify Telegram" 
+        message: error instanceof Error ? error.message : "Failed to send push notifications" 
       });
     }
   });

@@ -18,7 +18,11 @@ import {
   getDoc,
   setDoc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  getDocs,
+  messaging,
+  getToken,
+  onMessage
 } from '@/src/lib/firebase';
 import { calculateDistance, TARGET_COORDS, ALLOWED_RADIUS } from '@/src/lib/haversine';
 import { StudentCheckin, UserProfile } from '@/src/types';
@@ -79,6 +83,43 @@ export default function App() {
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [alarmActive, setAlarmActive] = useState(false);
   const [localAlarmBypass, setLocalAlarmBypass] = useState(false);
+  const [fcmToken, setFcmToken] = useState<string | null>(null);
+
+  // FCM Permission & Token setup
+  useEffect(() => {
+    if (!messaging || !user) return;
+
+    const requestPermission = async () => {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const token = await getToken(messaging, {
+            vapidKey: 'BM2VvInR6yYf3lA6CgEAYm9f8zN9_oE8rM8Hn9_x6z6z6z6z6z6z6z6z6z' // This is a placeholder, user needs real VAPID key
+          });
+          if (token) {
+            console.log('FCM Token:', token);
+            setFcmToken(token);
+            // Save token to user profile
+            const userDocRef = doc(db, 'users', user.uid);
+            await updateDoc(userDocRef, { fcmToken: token });
+          }
+        }
+      } catch (error) {
+        console.error('Push Notification Setup Failed:', error);
+      }
+    };
+
+    requestPermission();
+
+    const unsubscribe = onMessage(messaging, (payload) => {
+      console.log('Foreground Message:', payload);
+      if (payload.notification) {
+        setMessage({ text: `🔔 ${payload.notification.title}: ${payload.notification.body}`, type: 'success' });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Auth Listener
   useEffect(() => {
@@ -274,33 +315,49 @@ export default function App() {
       if (newState) {
         setLocalAlarmBypass(false);
         
-        // Telegram - non-blocking feedback
-        fetch('/api/notify-telegram', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            alarmActive: true,
-            appUrl: window.location.origin
-          })
-        }).then(async r => {
-          const contentType = r.headers.get("content-type");
-          if (!contentType || !contentType.includes("application/json")) {
-            // This happens on static hosts like Netlify where API doesn't exist (returns HTML 404)
-            throw new Error('API server not found. Please use the AI Studio Build Preview/Share link for Telegram features.');
+        // Broadcast Push Notifications to all users via FCM
+        try {
+          // Get all user tokens from Firestore
+          const usersSnapshot = await getDocs(collection(db, 'users'));
+          const allTokens = usersSnapshot.docs
+            .map(d => d.data().fcmToken)
+            .filter(t => !!t);
+
+          if (allTokens.length > 0) {
+            fetch('/api/notify-push', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                alarmActive: true,
+                tokens: allTokens
+              })
+            }).then(async r => {
+              const contentType = r.headers.get("content-type");
+              if (!contentType || !contentType.includes("application/json")) {
+                throw new Error('Push Server not found. Access via AI Studio Preview.');
+              }
+              const data = await r.json();
+              if (!r.ok) throw new Error(data.message || 'Push server error');
+              return data;
+            }).then(data => {
+              console.log("Push Notification response:", data);
+              setMessage({ 
+                text: `Alarm triggered! Notifications sent to ${data.successCount} devices. ✅`, 
+                type: 'success' 
+              });
+            }).catch(err => {
+              console.error("Push Notification Failed:", err);
+              setMessage({ 
+                text: `Alarm triggered BUT Push Notifications failed: ${err.message}. Ensure FIREBASE_SERVICE_ACCOUNT is set!`, 
+                type: 'error' 
+              });
+            });
+          } else {
+            setMessage({ text: "Alarm triggered! (No devices registered for push yet)", type: 'success' });
           }
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.message || 'Notification server error');
-          return data;
-        }).then(data => {
-          console.log("Telegram response:", data);
-          setMessage({ text: "Alarm triggered successfully! (Telegram Sent ✅)", type: 'success' });
-        }).catch(err => {
-          console.error("Telegram Notification Failed:", err);
-          setMessage({ 
-            text: `Alarm triggered BUT Telegram failed: ${err.message}. Ensure TELEGRAM_BOT_TOKEN and CHAT_ID are set in AI Studio Secrets!`, 
-            type: 'error' 
-          });
-        });
+        } catch (err) {
+          console.error("Failed to gather tokens:", err);
+        }
       } else {
         setMessage({ text: "Alarm stopped successfully.", type: 'success' });
       }

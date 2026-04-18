@@ -13,14 +13,17 @@ import {
   setDoc, 
   getDoc, 
   updateDoc, 
-  deleteDoc 
+  deleteDoc,
+  getDocs
 } from 'firebase/firestore';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
+export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
 
 // Error handling helper
 export enum OperationType {
@@ -86,5 +89,8 @@ export {
   setDoc,
   getDoc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  getDocs,
+  getToken,
+  onMessage
 };
